@@ -1790,6 +1790,10 @@ void NetworkStore::configure(pStoreConf configuration, pStoreConf parent) {
     }
   }
 
+  if (!configuration->getString("new_category", newCategory)) {
+      newCategory = categoryHandled;
+  }
+
   // if this network store dynamic configured?
   // get network dynamic updater parameters
   string dynamicType;
@@ -1945,6 +1949,7 @@ shared_ptr<Store> NetworkStore::copy(const std::string &category) {
   store->remoteHost = remoteHost;
   store->remotePort = remotePort;
   store->serviceName = serviceName;
+  store->newCategory = newCategory;
 
   return copied;
 }
@@ -1962,6 +1967,11 @@ NetworkStore::handleMessages(boost::shared_ptr<logentry_vector_t> messages) {
              categoryHandled.c_str());
     return false;
     }
+  }
+
+  for (logentry_vector_t::iterator it = messages->begin();
+          it != messages->end(); ++it) {
+      (*it)->category = newCategory;
   }
 
   bool tryDummySend = shouldSendDummy(messages);
