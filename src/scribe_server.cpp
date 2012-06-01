@@ -464,6 +464,71 @@ ResultCode scribeHandler::Log(const vector<LogEntry>&  messages) {
   return result;
 }
 
+void scribeHandler::LogAsync(const vector<LogEntry>&  messages) {
+  scribeHandlerLock->acquireRead();
+  if(status == STOPPING) {
+    goto end;
+  }
+
+  if (throttleRequest(messages)) {
+    goto end;
+  }
+
+  for (vector<LogEntry>::const_iterator msg_iter = messages.begin();
+       msg_iter != messages.end();
+       ++msg_iter) {
+
+    // disallow blank category from the start
+    if ((*msg_iter).category.empty()) {
+      incCounter("received blank category");
+      continue;
+    }
+
+    shared_ptr<store_list_t> store_list;
+    string category = (*msg_iter).category;
+
+    category_map_t::iterator cat_iter;
+    // First look for an exact match of the category
+    if ((cat_iter = categories.find(category)) != categories.end()) {
+      store_list = cat_iter->second;
+    }
+
+    // Try creating a new store for this category if we didn't find one
+    if (store_list == NULL) {
+      // Need write lock to create a new category
+      scribeHandlerLock->release();
+      scribeHandlerLock->acquireWrite();
+
+      // This may cause some duplicate messages if some messages in this batch
+      // were already added to queues
+      if(status == STOPPING) {
+        goto end;
+      }
+
+      if ((cat_iter = categories.find(category)) != categories.end()) {
+        store_list = cat_iter->second;
+      } else {
+        store_list = createNewCategory(category);
+      }
+
+    }
+
+    if (store_list == NULL) {
+      LOG_OPER("log entry has invalid category <%s>", category.c_str());
+      incCounter(category, "received bad");
+
+      continue;
+    }
+
+    // Log this message
+    addMessage(*msg_iter, store_list);
+  }
+
+ end:
+  scribeHandlerLock->release();
+  return;
+}
+
 // Returns true if overloaded.
 // Allows a fixed number of messages per second.
 bool scribeHandler::throttleDeny(int num_messages) {
